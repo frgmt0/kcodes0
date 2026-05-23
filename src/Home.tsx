@@ -247,7 +247,6 @@ export default function Home() {
       <div className="grain" aria-hidden />
 
       <HUD
-        t={t}
         total={N}
         focusIdx={focusIdx}
         focusName={focusRepo?.name ?? null}
@@ -337,12 +336,12 @@ export default function Home() {
 
         {error && !repos && (
           <div className="overlay-status" role="status">
-            <span className="hud-dot hud-dot--err" /> {error}
+            <span className="chip-dot chip-dot--err" /> {error}
           </div>
         )}
         {!error && !repos && (
           <div className="overlay-status" role="status">
-            <span className="hud-dot" /> loading transmission
+            <span className="chip-dot" /> loading transmission
           </div>
         )}
       </main>
