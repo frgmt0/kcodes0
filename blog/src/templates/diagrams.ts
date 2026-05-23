@@ -4,59 +4,54 @@
 //           ASCII art (preserved formatting)
 
 export const diagramStyles = `
-  /* Diagram container styles */
   .diagram-container {
-    margin: 1.5rem 0;
-    padding: 1rem;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid #2a2825;
-    border-radius: 8px;
+    margin: 1.75rem 0;
+    padding: 1.1rem;
+    background: var(--bg-2);
+    border: 1px solid var(--line);
     overflow-x: auto;
   }
 
-  .diagram-container.mermaid-diagram {
-    text-align: center;
-  }
-
-  .diagram-container.mermaid-diagram svg {
-    max-width: 100%;
-    height: auto;
-  }
+  .diagram-container.mermaid-diagram { text-align: center; }
+  .diagram-container.mermaid-diagram svg { max-width: 100%; height: auto; }
 
   .diagram-container.chart-diagram {
     max-width: 600px;
     margin-left: auto;
     margin-right: auto;
   }
-
-  .diagram-container.chart-diagram canvas {
-    max-width: 100%;
-  }
+  .diagram-container.chart-diagram canvas { max-width: 100%; }
 
   .diagram-container.ascii-diagram {
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-family: var(--mono);
     font-size: 0.85rem;
-    line-height: 1.4;
+    line-height: 1.45;
     white-space: pre;
     overflow-x: auto;
+    color: var(--fg-prose);
+  }
+
+  .diagram-loading {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    padding: 0.5rem 0;
+    text-align: center;
   }
 
   .diagram-error {
-    color: #c44;
-    font-family: 'SF Mono', 'Fira Code', monospace;
+    color: var(--err);
+    font-family: var(--mono);
     font-size: 0.85rem;
-    padding: 1rem;
-    background: rgba(204, 68, 68, 0.1);
-    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    background: rgba(210, 74, 74, 0.06);
+    border: 1px solid rgba(210, 74, 74, 0.25);
   }
 
-  .mermaid-diagram {
-    --mermaid-bg: transparent;
-  }
-
-  .mermaid-diagram text {
-    fill: #d5d0c8 !important;
-  }
+  .mermaid-diagram { --mermaid-bg: transparent; }
+  .mermaid-diagram text { fill: var(--fg-prose) !important; }
 `;
 
 // CDN scripts for diagram libraries
@@ -77,18 +72,18 @@ export const diagramInitScript = `
           startOnLoad: false,
           theme: 'dark',
           themeVariables: {
-            primaryColor: '#a8c8e8',
-            primaryTextColor: '#d5d0c8',
-            primaryBorderColor: '#2a2825',
-            lineColor: '#5a5650',
-            secondaryColor: '#2a2825',
-            tertiaryColor: '#1e1d1b',
-            background: '#141312',
-            mainBkg: '#1e1d1b',
-            nodeBorder: '#a8c8e8',
-            clusterBkg: '#1e1d1b',
-            titleColor: '#d5d0c8',
-            edgeLabelBackground: '#1e1d1b'
+            primaryColor: '#e8541f',
+            primaryTextColor: '#f1ece0',
+            primaryBorderColor: '#353330',
+            lineColor: '#7a766c',
+            secondaryColor: '#1c1b18',
+            tertiaryColor: '#111114',
+            background: '#0a0a0b',
+            mainBkg: '#111114',
+            nodeBorder: '#e8541f',
+            clusterBkg: '#111114',
+            titleColor: '#f1ece0',
+            edgeLabelBackground: '#111114'
           },
           flowchart: { curve: 'basis', padding: 20 },
           sequence: { actorMargin: 50, messageMargin: 40 },
@@ -122,11 +117,11 @@ export const diagramInitScript = `
           const code = el.textContent;
           try {
             const config = JSON.parse(code);
-            const textColor = '#d5d0c8';
-            const gridColor = 'rgba(213, 208, 200, 0.1)';
+            const textColor = '#f1ece0';
+            const gridColor = 'rgba(241, 236, 224, 0.08)';
 
-            // Site accent color palette for chart data
-            const accentPalette = ['#a8c8e8', '#8ab0d0', '#6a98b8', '#d5d0c8', '#8a8680', '#5a5650'];
+            // Vermillion + warm-bone palette stepped from accent to neutral.
+            const accentPalette = ['#e8541f', '#c4471a', '#a83a14', '#f1ece0', '#7a766c', '#353330'];
 
             // Apply theme colors to config
             if (!config.options) config.options = {};
