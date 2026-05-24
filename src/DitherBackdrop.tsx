@@ -96,12 +96,10 @@ void main(){
 }
 `;
 
-type Props = { t: number };
+type Props = { tRef: React.MutableRefObject<number> };
 
-export default function DitherBackdrop({ t }: Props) {
+export default function DitherBackdrop({ tRef }: Props) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const tRef = useRef(t);
-  tRef.current = t;
   const mouseRef = useRef<{ x: number; y: number }>({ x: 0.5, y: 0.5 });
 
   useEffect(() => {

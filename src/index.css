@@ -122,16 +122,70 @@ a { color: inherit; text-decoration: none; }
   z-index: 6;
   top: 70px;
   left: 56px;
-  display: inline-grid;
-  grid-template-columns: 1fr;
+  display: inline-block;
   font-family: var(--display);
   font-weight: 700;
   letter-spacing: -0.045em;
   line-height: 0.9;
   font-size: clamp(72px, 14vw, 196px);
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: crosshair;
   user-select: none;
   mix-blend-mode: normal;
+  /* Updated per frame by Signature.tsx — drive the cursor-tracked mask. */
+  --hx: -200px;
+  --hy: -200px;
+  --melt: 0;
+}
+
+/* Sharp base + melt overlay live in mirrored stacks. The sharp stack
+   sizes .sig (in-flow); the melt stack overlays via absolute pos and
+   is the only one carrying the liquify filter + cursor mask. */
+.sig-stack {
+  display: inline-grid;
+  grid-template-columns: 1fr;
+}
+.sig-stack--melt {
+  position: absolute;
+  top: 0;
+  left: 0;
+  /* Drip room: extends the mask region below the sharp baseline so
+     sagged pixels remain visible past where the static text ends. */
+  padding-bottom: 260px;
+  pointer-events: none;
+  /* Filter already isolates the element; contain reinforces that the
+     mask + filter work doesn't invalidate the rest of the page. */
+  contain: layout style paint;
+  filter: url(#sig-liquify);
+  opacity: var(--melt);
+  /* Cursor-localized bloom: ellipse stretched vertically and offset
+     downward so the visible region trails below the heat source like
+     a drip cone. Falloff stops are soft to blend into the sharp base. */
+  -webkit-mask-image: radial-gradient(
+    ellipse 200px 360px at var(--hx) calc(var(--hy) + 70px),
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 0.85) 22%,
+    rgba(0, 0, 0, 0.45) 50%,
+    rgba(0, 0, 0, 0) 82%
+  );
+  mask-image: radial-gradient(
+    ellipse 200px 360px at var(--hx) calc(var(--hy) + 70px),
+    rgba(0, 0, 0, 1) 0%,
+    rgba(0, 0, 0, 0.85) 22%,
+    rgba(0, 0, 0, 0.45) 50%,
+    rgba(0, 0, 0, 0) 82%
+  );
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+
+/* Off-DOM SVG that hosts the liquify <filter>. */
+.sig-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+  overflow: hidden;
 }
 .sig-chan {
   grid-column: 1;
@@ -352,6 +406,10 @@ a { color: inherit; text-decoration: none; }
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.03),
     0 24px 60px -30px rgba(0, 0, 0, 0.65);
+  /* Isolate paint + layout: card repaints from transform changes don't
+     invalidate siblings. `contain: strict` is too strong (would clip
+     overflow); layout/style/paint is the sweet spot. */
+  contain: layout style paint;
   backdrop-filter: blur(3px);
   -webkit-backdrop-filter: blur(3px);
 }
@@ -565,4 +623,6 @@ a { color: inherit; text-decoration: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .chip-dot, .sig-cursor { animation: none; }
+  .sig { cursor: default; }
+  .sig-stack--melt { display: none; }
 }

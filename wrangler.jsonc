@@ -1,13 +1,13 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "konacodes",
+  "name": "frgmt-xyz",
   "compatibility_date": "2025-04-01",
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application"
   },
   "routes": [
-    { "pattern": "kcodes.me/*", "zone_name": "kcodes.me" },
-    { "pattern": "www.kcodes.me/*", "zone_name": "kcodes.me" }
+    { "pattern": "frgmt.xyz/*", "zone_name": "frgmt.xyz" },
+    { "pattern": "www.frgmt.xyz/*", "zone_name": "frgmt.xyz" }
   ]
 }

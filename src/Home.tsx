@@ -20,7 +20,8 @@ const REFRESH_MS = 60_000;
 
 // Quasi-periodic curve (two incommensurate sines per axis + forward drift).
 // `drift * step` is sized larger than a card width so consecutive cards
-// can never horizontally collide.
+// can never horizontally collide. Z is a separate slow wave so cards
+// breathe through depth as the camera tracks past them.
 const CURVE = {
   step: 1.45,
   drift: 980,
@@ -38,6 +39,9 @@ const CURVE = {
   harmY: 150,
   hpx: 0.4,
   hpy: 1.2,
+
+  fz1: 0.43, az1: 200, pz1: 1.7,
+  fz2: 0.91, az2: 90,  pz2: 0.3,
 };
 
 function pathPos(t: number) {
@@ -48,7 +52,10 @@ function pathPos(t: number) {
   const y =
     Math.cos(CURVE.fy * t + CURVE.py) * CURVE.scaleY +
     Math.sin(CURVE.hfy * t + CURVE.hpy) * CURVE.harmY;
-  return { x, y };
+  const z =
+    Math.sin(CURVE.fz1 * t + CURVE.pz1) * CURVE.az1 +
+    Math.cos(CURVE.fz2 * t + CURVE.pz2) * CURVE.az2;
+  return { x, y, z };
 }
 
 function fmtWhen(iso: string): string {
@@ -65,9 +72,6 @@ function fmtWhen(iso: string): string {
 const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(b, v));
 const mod = (n: number, m: number) => ((n % m) + m) % m;
 
-// 5×5 halftone thumbprint from a repo name. Deterministic — same name
-// always renders the same dot pattern. Density biased by name length so
-// short/long names visually differ at a glance.
 function thumbprintCells(name: string): number[] {
   const seedBase = (() => {
     let h = 2166136261;
@@ -81,7 +85,6 @@ function thumbprintCells(name: string): number[] {
   let x = seedBase || 1;
   for (let i = 0; i < 25; i++) {
     x = (Math.imul(x, 1664525) + 1013904223) >>> 0;
-    // 0-3: empty, small, mid, full
     cells.push(x & 3);
   }
   return cells;
@@ -102,10 +105,22 @@ export default function Home() {
   const [repos, setRepos] = useState<Repo[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [t, setT] = useState(0);
+  // t and parallax are refs only — no React state, no per-frame renders.
+  // Cards and world transforms are updated imperatively in the RAF tick.
   const tRef = useRef(0);
   const targetT = useRef(0);
+  const parallaxRef = useRef({ x: 0, y: 0 });
+  const parallaxTarget = useRef({ x: 0, y: 0 });
   const rafRef = useRef<number | null>(null);
+
+  // focusIdx is the only animation-derived value that drives React renders
+  // — used by HUD. Only sets state on transitions, not per frame.
+  const [focusIdx, setFocusIdx] = useState(0);
+  const focusIdxRef = useRef(0);
+
+  const worldRef = useRef<HTMLDivElement | null>(null);
+  const cardRefs = useRef<Array<HTMLAnchorElement | null>>([]);
+  const cardFocusRefs = useRef<Array<boolean>>([]);
 
   useEffect(() => {
     let alive = true;
@@ -136,6 +151,7 @@ export default function Home() {
     };
   }, []);
 
+  // Input listeners — all write to refs only. No setState in the hot path.
   useEffect(() => {
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
@@ -171,7 +187,6 @@ export default function Home() {
       e.preventDefault();
     };
 
-    // Drag-to-pan with primary mouse button (ignores clicks on cards/links).
     let dragging = false;
     let dragX = 0;
     let dragY = 0;
@@ -183,7 +198,14 @@ export default function Home() {
       dragY = e.clientY;
       document.body.classList.add('is-dragging');
     };
+    const reduceMotion =
+      typeof window !== 'undefined' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const onMove = (e: PointerEvent) => {
+      if (!reduceMotion) {
+        parallaxTarget.current.x = (e.clientX / window.innerWidth - 0.5) * 2;
+        parallaxTarget.current.y = (e.clientY / window.innerHeight - 0.5) * 2;
+      }
       if (!dragging) return;
       const dx = dragX - e.clientX;
       const dy = dragY - e.clientY;
@@ -205,16 +227,6 @@ export default function Home() {
     window.addEventListener('pointerup', onUp);
     window.addEventListener('pointercancel', onUp);
 
-    const tick = () => {
-      const next = tRef.current + (targetT.current - tRef.current) * 0.09;
-      if (Math.abs(next - tRef.current) > 0.00001) {
-        tRef.current = next;
-        setT(next);
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-
     return () => {
       window.removeEventListener('wheel', onWheel);
       window.removeEventListener('keydown', onKey);
@@ -224,25 +236,152 @@ export default function Home() {
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       window.removeEventListener('pointercancel', onUp);
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, []);
 
-  // --- LOOPING ---
-  // t is unbounded; we render the repo list 3× at section offsets so the
-  // user can scroll endlessly without ever seeing a seam.
-  const N = repos?.length ?? 0;
-  const totalSpan = N * CURVE.step;
-  const cam = useMemo(() => pathPos(t), [t]);
+  // RAF tick — pure imperative DOM mutation. The only React state update
+  // is setFocusIdx when the focused card actually changes (rare).
+  useEffect(() => {
+    if (!repos || repos.length === 0) return;
+    const N = repos.length;
+    const totalSpan = N * CURVE.step;
+    const totalCards = 3 * N;
 
-  const section = N > 0 ? Math.floor((t + CURVE.step / 2) / totalSpan) : 0;
-  const focusAbs = N > 0 ? Math.round(t / CURVE.step) : 0;
-  const focusIdx = N > 0 ? mod(focusAbs, N) : 0;
+    cardRefs.current.length = totalCards;
+    cardFocusRefs.current.length = totalCards;
+
+    const tick = () => {
+      tRef.current += (targetT.current - tRef.current) * 0.09;
+      parallaxRef.current.x +=
+        (parallaxTarget.current.x - parallaxRef.current.x) * 0.06;
+      parallaxRef.current.y +=
+        (parallaxTarget.current.y - parallaxRef.current.y) * 0.06;
+
+      const t = tRef.current;
+      const px = parallaxRef.current.x;
+      const py = parallaxRef.current.y;
+      const cam = pathPos(t);
+
+      const w = worldRef.current;
+      if (w) {
+        w.style.transform = `rotateX(${(py * -3).toFixed(3)}deg) rotateY(${(px * 5).toFixed(3)}deg) translate3d(${(-cam.x).toFixed(2)}px, ${(-cam.y).toFixed(2)}px, 0)`;
+      }
+
+      const section = Math.floor((t + CURVE.step / 2) / totalSpan);
+
+      for (let slot = 0; slot < totalCards; slot++) {
+        const el = cardRefs.current[slot];
+        if (!el) continue;
+        const sIdx = Math.floor(slot / N);
+        const i = slot % N;
+        const sec = section - 1 + sIdx;
+        const absIdx = sec * N + i;
+        const ti = absIdx * CURVE.step;
+        const p = pathPos(ti);
+        const du = (ti - t) / CURVE.step;
+        const absDu = du < 0 ? -du : du;
+        const angle = clamp(du * 38, -78, 78);
+        const baseOp = absDu > 3.2 ? 0 : clamp(1 - Math.pow(absDu / 3.2, 2), 0, 1);
+        const depthFade = clamp(1 + Math.min(0, p.z) / 700, 0.62, 1);
+        const opacity = baseOp * depthFade;
+        const focused = absDu < 0.5;
+
+        const s = el.style;
+        s.transform = `translate3d(${p.x.toFixed(2)}px, ${p.y.toFixed(2)}px, ${p.z.toFixed(2)}px) rotateY(${angle.toFixed(2)}deg)`;
+        s.opacity = opacity.toFixed(3);
+        s.pointerEvents = absDu > 1.5 ? 'none' : 'auto';
+
+        if (focused !== cardFocusRefs.current[slot]) {
+          cardFocusRefs.current[slot] = focused;
+          el.classList.toggle('is-focus', focused);
+        }
+      }
+
+      const focusAbs = Math.round(t / CURVE.step);
+      const nextFocusIdx = mod(focusAbs, N);
+      if (nextFocusIdx !== focusIdxRef.current) {
+        focusIdxRef.current = nextFocusIdx;
+        setFocusIdx(nextFocusIdx);
+      }
+
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    rafRef.current = requestAnimationFrame(tick);
+
+    return () => {
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    };
+  }, [repos]);
+
+  // Card pool — rendered once per repos change. 3*N stable DOM nodes
+  // whose transforms are mutated imperatively in the tick. Keys are
+  // slot-based (not section-based) so React never tears them down.
+  const cardPool = useMemo(() => {
+    if (!repos || repos.length === 0) return null;
+    const N = repos.length;
+    return Array.from({ length: 3 * N }, (_, slot) => {
+      const i = slot % N;
+      const r = repos[i]!;
+      return (
+        <a
+          key={`slot_${slot}`}
+          ref={(el) => {
+            cardRefs.current[slot] = el;
+          }}
+          className="card"
+          href={r.html_url}
+          target="_blank"
+          rel="noreferrer"
+          style={{ opacity: 0 }}
+        >
+          <span className="card-corners" aria-hidden>
+            <span /><span /><span /><span />
+          </span>
+
+          <div className="card-head">
+            <span className="card-spec">
+              spec_{String(i + 1).padStart(2, '0')}
+              <em>/</em>
+              {String(N).padStart(2, '0')}
+            </span>
+            <span className="card-when">{fmtWhen(r.pushed_at)}</span>
+          </div>
+
+          <div className="card-body">
+            <Thumbprint name={r.name} />
+            <div className="card-titles">
+              <div className="card-name" data-text={r.name}>{r.name}</div>
+              {r.description && (
+                <div className="card-desc">{r.description}</div>
+              )}
+            </div>
+          </div>
+
+          <div className="card-foot">
+            <span className="card-foot-lang">
+              <span className="card-pip" />
+              {r.language ? r.language.toLowerCase() : 'none'}
+            </span>
+            <span className="card-foot-stars">
+              {r.stargazers_count > 0 ? `★${r.stargazers_count}` : '—'}
+            </span>
+            <span
+              className={`card-foot-status${r.archived ? ' is-archived' : ''}`}
+            >
+              {r.archived ? 'archived' : 'live'}
+            </span>
+          </div>
+        </a>
+      );
+    });
+  }, [repos]);
+
+  const N = repos?.length ?? 0;
   const focusRepo = repos?.[focusIdx] ?? null;
 
   return (
     <div className="home">
-      <DitherBackdrop t={t} />
+      <DitherBackdrop tRef={tRef} />
       <div className="scanlines" aria-hidden />
       <div className="grain" aria-hidden />
 
@@ -252,78 +391,11 @@ export default function Home() {
         focusName={focusRepo?.name ?? null}
       />
 
-      <Signature t={t} />
+      <Signature tRef={tRef} />
 
       <main className="stage" aria-label="repositories">
-        <div className="world" style={{ transform: `translate3d(${-cam.x}px, ${-cam.y}px, 0)` }}>
-          {repos &&
-            [section - 1, section, section + 1].flatMap((sec) =>
-              repos.map((r, i) => {
-                const absIdx = sec * N + i;
-                const ti = absIdx * CURVE.step;
-                const p = pathPos(ti);
-
-                const du = (ti - t) / CURVE.step;
-                const angle = clamp(du * 38, -78, 78);
-                const absDu = Math.abs(du);
-                const opacity = absDu > 3.2 ? 0 : clamp(1 - Math.pow(absDu / 3.2, 2), 0, 1);
-                const focused = absDu < 0.5;
-
-                return (
-                  <a
-                    key={`${sec}-${r.id}`}
-                    className={`card${focused ? ' is-focus' : ''}`}
-                    href={r.html_url}
-                    target="_blank"
-                    rel="noreferrer"
-                    style={{
-                      transform: `translate3d(${p.x}px, ${p.y}px, 0) rotateY(${angle}deg)`,
-                      opacity,
-                      pointerEvents: absDu > 1.5 ? 'none' : 'auto',
-                    }}
-                    aria-hidden={opacity === 0}
-                  >
-                    <span className="card-corners" aria-hidden>
-                      <span /><span /><span /><span />
-                    </span>
-
-                    <div className="card-head">
-                      <span className="card-spec">
-                        spec_{String(mod(i, N) + 1).padStart(2, '0')}
-                        <em>/</em>
-                        {String(N).padStart(2, '0')}
-                      </span>
-                      <span className="card-when">{fmtWhen(r.pushed_at)}</span>
-                    </div>
-
-                    <div className="card-body">
-                      <Thumbprint name={r.name} />
-                      <div className="card-titles">
-                        <div className="card-name" data-text={r.name}>{r.name}</div>
-                        {r.description && (
-                          <div className="card-desc">{r.description}</div>
-                        )}
-                      </div>
-                    </div>
-
-                    <div className="card-foot">
-                      <span className="card-foot-lang">
-                        <span className="card-pip" />
-                        {r.language ? r.language.toLowerCase() : 'none'}
-                      </span>
-                      <span className="card-foot-stars">
-                        {r.stargazers_count > 0 ? `★${r.stargazers_count}` : '—'}
-                      </span>
-                      <span
-                        className={`card-foot-status${r.archived ? ' is-archived' : ''}`}
-                      >
-                        {r.archived ? 'archived' : 'live'}
-                      </span>
-                    </div>
-                  </a>
-                );
-              })
-            )}
+        <div ref={worldRef} className="world">
+          {cardPool}
         </div>
 
         <div className="reticle" aria-hidden>
